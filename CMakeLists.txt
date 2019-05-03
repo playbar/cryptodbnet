@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 message(${CMAKE_CXX_COMPILER_ID})
 
+add_subdirectory(aes)
 add_subdirectory(openssl)
 
 MESSAGE("make files end")
