@@ -9,7 +9,8 @@ message(${CMAKE_CXX_COMPILER_ID})
 
 add_subdirectory(aes)
 #add_subdirectory(boringssl)
-add_subdirectory(openssl)
+add_subdirectory(cryptopp)
+#add_subdirectory(openssl)
 
 MESSAGE("make files end")
 
