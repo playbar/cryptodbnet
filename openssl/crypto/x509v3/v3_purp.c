@@ -172,8 +172,8 @@ int X509_PURPOSE_add(int id, int trust, int flags,
 
     /* OPENSSL_free existing name if dynamic */
     if (ptmp->flags & X509_PURPOSE_DYNAMIC_NAME) {
-        OPENSSL_free(ptmp->name);
-        OPENSSL_free(ptmp->sname);
+        OPENSSL_free((void*)ptmp->name);
+        OPENSSL_free((void*)ptmp->sname);
     }
     /* dup supplied name */
     ptmp->name = OPENSSL_strdup(name);
@@ -207,8 +207,8 @@ int X509_PURPOSE_add(int id, int trust, int flags,
     return 1;
  err:
     if (idx == -1) {
-        OPENSSL_free(ptmp->name);
-        OPENSSL_free(ptmp->sname);
+        OPENSSL_free((void*)ptmp->name);
+        OPENSSL_free((void*)ptmp->sname);
         OPENSSL_free(ptmp);
     }
     return 0;
@@ -220,8 +220,8 @@ static void xptable_free(X509_PURPOSE *p)
         return;
     if (p->flags & X509_PURPOSE_DYNAMIC) {
         if (p->flags & X509_PURPOSE_DYNAMIC_NAME) {
-            OPENSSL_free(p->name);
-            OPENSSL_free(p->sname);
+            OPENSSL_free((void*)p->name);
+            OPENSSL_free((void*)p->sname);
         }
         OPENSSL_free(p);
     }
@@ -238,12 +238,12 @@ int X509_PURPOSE_get_id(const X509_PURPOSE *xp)
     return xp->purpose;
 }
 
-char *X509_PURPOSE_get0_name(const X509_PURPOSE *xp)
+const char *X509_PURPOSE_get0_name(const X509_PURPOSE *xp)
 {
     return xp->name;
 }
 
-char *X509_PURPOSE_get0_sname(const X509_PURPOSE *xp)
+const char *X509_PURPOSE_get0_sname(const X509_PURPOSE *xp)
 {
     return xp->sname;
 }

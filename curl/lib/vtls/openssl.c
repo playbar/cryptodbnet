@@ -2574,6 +2574,7 @@ static CURLcode ossl_connect_step1(struct connectdata *conn, int sockindex)
 
 #ifdef HAVE_SSL_CTX_SET_POST_HANDSHAKE_AUTH
   /* OpenSSL 1.1.1 requires clients to opt-in for PHA */
+    //todo
   SSL_CTX_set_post_handshake_auth(BACKEND->ctx, 1);
 #endif
 

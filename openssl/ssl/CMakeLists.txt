@@ -1,23 +1,11 @@
 include_directories(../include)
 
-add_library(
-  ssl
+file(GLOB SSL_SRC ./*.c)
 
-  bio_ssl.c
-  d1_lib.c
-
+add_library(ssl STATIC
+    ${SSL_SRC}
 )
 
 target_link_libraries(ssl crypto)
 
-#add_executable(
-#  ssl_test
-#
-#  ssl_test.cc
-#
-#  $<TARGET_OBJECTS:gtest_main>
-#  $<TARGET_OBJECTS:test_support>
-#)
-#
-#target_link_libraries(ssl_test ssl crypto gtest)
-#add_dependencies(all_tests ssl_test)
+
