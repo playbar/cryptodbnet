@@ -2576,7 +2576,7 @@ static CURLcode ossl_connect_step1(struct connectdata *conn, int sockindex)
   /* OpenSSL 1.1.1 requires clients to opt-in for PHA */
   //todo
 //  SSL_CTX_set_post_handshake_auth(BACKEND->ctx, 1);
-  BACKEND->ctx->pha_enabled = 1;
+//  BACKEND->ctx->pha_enabled = 1;
 #endif
 
 #ifdef USE_TLS_SRP
