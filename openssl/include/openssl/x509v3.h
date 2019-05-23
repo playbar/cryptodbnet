@@ -404,8 +404,8 @@ typedef struct x509_purpose_st {
     int trust;                  /* Default trust ID */
     int flags;
     int (*check_purpose) (const struct x509_purpose_st *, const X509 *, int);
-    const char *name;
-    const char *sname;
+    char *name;
+    char *sname;
     void *usr_data;
 } X509_PURPOSE;
 
@@ -669,8 +669,8 @@ int X509_PURPOSE_get_by_id(int id);
 int X509_PURPOSE_add(int id, int trust, int flags,
                      int (*ck) (const X509_PURPOSE *, const X509 *, int),
                      const char *name, const char *sname, void *arg);
-const char *X509_PURPOSE_get0_name(const X509_PURPOSE *xp);
-const char *X509_PURPOSE_get0_sname(const X509_PURPOSE *xp);
+char *X509_PURPOSE_get0_name(const X509_PURPOSE *xp);
+char *X509_PURPOSE_get0_sname(const X509_PURPOSE *xp);
 int X509_PURPOSE_get_trust(const X509_PURPOSE *xp);
 void X509_PURPOSE_cleanup(void);
 int X509_PURPOSE_get_id(const X509_PURPOSE *);

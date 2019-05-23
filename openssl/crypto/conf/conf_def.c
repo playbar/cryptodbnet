@@ -21,8 +21,6 @@
 #include <openssl/err.h>
 #ifndef OPENSSL_NO_POSIX_IO
 # include <sys/stat.h>
-#include <e_os.h>
-
 # ifdef _WIN32
 #  define stat    _stat
 #  define strcasecmp _stricmp
@@ -671,8 +669,7 @@ static int str_copy(CONF *conf, char *section, char **pto, char *from)
 static BIO *process_include(char *include, OPENSSL_DIR_CTX **dirctx,
                             char **dirpath)
 {
-    struct stat st;
-    memset( &st, 0, sizeof( struct stat));
+    struct stat st = { 0 };
     BIO *next;
 
     if (stat(include, &st) < 0) {

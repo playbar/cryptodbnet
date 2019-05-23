@@ -1,274 +1,199 @@
-cmake_minimum_required (VERSION 2.8.11)
+# Based on original work by David Manura
+# Copyright (C) 2007-2012 LuaDist.
+# Copyright (C) 2013 Brian Sidebotham
 
-# Defer enabling C and CXX languages.
-project (openssl NONE)
+# Redistribution and use of this file is allowed according to the terms of the
+# MIT license.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+project( openssl )
+cmake_minimum_required( VERSION 3.1.0 )
+
+set(CMAKE_DISABLE_SOURCE_CHANGES ON)
+set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
+
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
+option(WITH_APPS "Build applications" ON)
+
+# OpenSSL version detection imported from FindOpenSSL.cmake
+
+file(STRINGS "${PROJECT_SOURCE_DIR}/include/openssl/opensslv.h" openssl_version_str
+  REGEX "^#[\t ]*define[\t ]+OPENSSL_VERSION_NUMBER[\t ]+0x([0-9a-fA-F])+.*")
+
+function(from_hex HEX DEC)
+  string(TOUPPER "${HEX}" HEX)
+  set(_res 0)
+  string(LENGTH "${HEX}" _strlen)
+
+  while (_strlen GREATER 0)
+    math(EXPR _res "${_res} * 16")
+    string(SUBSTRING "${HEX}" 0 1 NIBBLE)
+    string(SUBSTRING "${HEX}" 1 -1 HEX)
+    if (NIBBLE STREQUAL "A")
+      math(EXPR _res "${_res} + 10")
+    elseif (NIBBLE STREQUAL "B")
+      math(EXPR _res "${_res} + 11")
+    elseif (NIBBLE STREQUAL "C")
+      math(EXPR _res "${_res} + 12")
+    elseif (NIBBLE STREQUAL "D")
+      math(EXPR _res "${_res} + 13")
+    elseif (NIBBLE STREQUAL "E")
+      math(EXPR _res "${_res} + 14")
+    elseif (NIBBLE STREQUAL "F")
+      math(EXPR _res "${_res} + 15")
+    else()
+      math(EXPR _res "${_res} + ${NIBBLE}")
+    endif()
+
+    string(LENGTH "${HEX}" _strlen)
+  endwhile()
+
+  set(${DEC} ${_res} PARENT_SCOPE)
+endfunction()
+
+string(REGEX REPLACE "^.*OPENSSL_VERSION_NUMBER[\t ]+0x([0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F]).*$"
+  "\\1;\\2;\\3;\\4;\\5" OPENSSL_VERSION_LIST "${openssl_version_str}")
+  list(GET OPENSSL_VERSION_LIST 0 OPENSSL_VERSION_MAJOR)
+  list(GET OPENSSL_VERSION_LIST 1 OPENSSL_VERSION_MINOR)
+  from_hex("${OPENSSL_VERSION_MINOR}" OPENSSL_VERSION_MINOR)
+  list(GET OPENSSL_VERSION_LIST 2 OPENSSL_VERSION_FIX)
+  from_hex("${OPENSSL_VERSION_FIX}" OPENSSL_VERSION_FIX)
+  list(GET OPENSSL_VERSION_LIST 3 OPENSSL_VERSION_PATCH)
+if (NOT OPENSSL_VERSION_PATCH STREQUAL "00")
+  from_hex("${OPENSSL_VERSION_PATCH}" _tmp)
+  # 96 is the ASCII code of 'a' minus 1
+  math(EXPR OPENSSL_VERSION_PATCH_ASCII "${_tmp} + 96")
+  unset(_tmp)
+  string(ASCII "${OPENSSL_VERSION_PATCH_ASCII}" OPENSSL_VERSION_PATCH_STRING)
+endif ()
+
+set(OPENSSL_VERSION "${OPENSSL_VERSION_MAJOR}.${OPENSSL_VERSION_MINOR}.${OPENSSL_VERSION_FIX}${OPENSSL_VERSION_PATCH_STRING}")
+
+message(STATUS "OpenSSL version ${OPENSSL_VERSION}")
+
+set( VERSION_MAJOR ${OPENSSL_VERSION_MAJOR} )
+set( VERSION_MINOR ${OPENSSL_VERSION_MINOR} )
+set( VERSION_PATCH ${OPENSSL_VERSION_PATCH} )
+
+set( VERSION_STRING ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH} )
+set( LIB_VERSION ${VERSION_MAJOR}.${VERSION_MINOR} )
+set( LIB_SOVERSION ${VERSION_MAJOR}.${VERSION_MINOR} )
+
+include_directories ( BEFORE SYSTEM
+    ${CMAKE_CURRENT_BINARY_DIR}/crypto
+    ${CMAKE_CURRENT_BINARY_DIR}/ssl
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+    crypto . )
+
+add_definitions( -DOPENSSL_NO_ASM )
+add_definitions( -DOPENSSL_NO_STATIC_ENGINE )
+add_definitions( "-DOPENSSLDIR=\"/usr/local/ssl\"" )
+add_definitions( "-DENGINESDIR=\"/usr/local/engines-1.1\"" )
+
+if(MSVC)
+  include(MSVCRuntime)
+  configure_msvc_runtime()
+endif()
 
 if(WIN32)
-  # On Windows, prefer cl over gcc if both are available. By default most of
-  # the CMake generators prefer gcc, even on Windows.
-  set(CMAKE_GENERATOR_CC cl)
+  set(CMAKE_SHARED_LIBRARY_PREFIX "lib")
+  set(CMAKE_STATIC_LIBRARY_PREFIX "lib")
 endif()
 
-enable_language(C)
-enable_language(CXX)
+if ( APPLE )
+  set( CMAKE_MACOSX_RPATH ON )
+  add_definitions( -DOPENSSL_SYSNAME_MACOSX )
+endif()
 
-if(ANDROID)
-  # Android-NDK CMake files reconfigure the path and so Go and Perl won't be
-  # found. However, ninja will still find them in $PATH if we just name them.
-  if(NOT PERL_EXECUTABLE)
-    set(PERL_EXECUTABLE "perl")
+if( WIN32 AND NOT CYGWIN )
+  add_definitions( -DOPENSSL_SYSNAME_WIN32 )
+  add_definitions( -DWIN32_LEAN_AND_MEAN )
+  add_definitions( -D_CRT_SECURE_NO_WARNINGS )
+
+  if (BUILD_SHARED_LIBS)
+    # avoid conflict: ocsp.h and wincrypt.h
+    add_definitions( -D_WINDLL )
   endif()
-  if(NOT GO_EXECUTABLE)
-    set(GO_EXECUTABLE "go")
-  endif()
+endif()
+
+if( MINGW )
+  set( CMAKE_SHARED_LINKER_FLAGS "-Wl,--export-all" )
+endif()
+
+include(CheckTypeSize)
+check_type_size( "long" LONG_INT )
+check_type_size( "long long" LONG_LONG_INT )
+check_type_size( "int" INT )
+if ( HAVE_LONG_INT AND (${LONG_INT} EQUAL 8) )
+  set ( SIXTY_FOUR_BIT_LONG ON )
+elseif ( HAVE_LONG_LONG_INT AND (${LONG_LONG_INT} EQUAL 8) )
+  set ( SIXTY_FOUR_BIT ON )
 else()
-  find_package(Perl REQUIRED)
-  find_program(GO_EXECUTABLE go)
+  set ( THIRTY_TWO_BIT ON )
 endif()
 
-if (NOT GO_EXECUTABLE)
-  message(FATAL_ERROR "Could not find Go")
+if ( WIN32 AND MINGW AND NOT CYGWIN )
+  set( OPENSSL_EXPORT_VAR_AS_FUNCTION true )
 endif()
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  set(C_CXX_FLAGS "-Wall -Werror -Wformat=2 -Wsign-compare -Wmissing-field-initializers -Wwrite-strings -ggdb -fvisibility=hidden -fno-common")
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wnewline-eof")
-  endif()
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_CXX_FLAGS} -Wmissing-prototypes -Wold-style-definition -Wstrict-prototypes")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${C_CXX_FLAGS} -Wmissing-declarations")
-  # Clang's integerated assembler does not support debug symbols.
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wa,-g")
-  endif()
-elseif(MSVC)
-  set(MSVC_DISABLED_WARNINGS_LIST
-      "C4061" # enumerator 'identifier' in switch of enum 'enumeration' is not
-              # explicitly handled by a case label
-              # Disable this because it flags even when there is a default.
-      "C4100" # 'exarg' : unreferenced formal parameter
-      "C4127" # conditional expression is constant
-      "C4200" # nonstandard extension used : zero-sized array in
-              # struct/union.
-      "C4204" # nonstandard extension used: non-constant aggregate initializer
-      "C4221" # nonstandard extension used : 'identifier' : cannot be
-              # initialized using address of automatic variable
-      "C4242" # 'function' : conversion from 'int' to 'uint8_t',
-              # possible loss of data
-      "C4244" # 'function' : conversion from 'int' to 'uint8_t',
-              # possible loss of data
-      "C4245" # 'initializing' : conversion from 'long' to
-              # 'unsigned long', signed/unsigned mismatch
-      "C4267" # conversion from 'size_t' to 'int', possible loss of data
-      "C4371" # layout of class may have changed from a previous version of the
-              # compiler due to better packing of member '...'
-      "C4388" # signed/unsigned mismatch
-      "C4296" # '>=' : expression is always true
-      "C4350" # behavior change: 'std::_Wrap_alloc...'
-      "C4365" # '=' : conversion from 'size_t' to 'int',
-              # signed/unsigned mismatch
-      "C4389" # '!=' : signed/unsigned mismatch
-      "C4464" # relative include path contains '..'
-      "C4510" # 'argument' : default constructor could not be generated
-      "C4512" # 'argument' : assignment operator could not be generated
-      "C4514" # 'function': unreferenced inline function has been removed
-      "C4548" # expression before comma has no effect; expected expression with
-              # side-effect" caused by FD_* macros.
-      "C4610" # struct 'argument' can never be instantiated - user defined
-              # constructor required.
-      "C4623" # default constructor was implicitly defined as deleted
-      "C4625" # copy constructor could not be generated because a base class
-              # copy constructor is inaccessible or deleted
-      "C4626" # assignment operator could not be generated because a base class
-              # assignment operator is inaccessible or deleted
-      "C4668" # 'symbol' is not defined as a preprocessor macro, replacing with
-              # '0' for 'directives'
-              # Disable this because GTest uses it everywhere.
-      "C4706" # assignment within conditional expression
-      "C4710" # 'function': function not inlined
-      "C4711" # function 'function' selected for inline expansion
-      "C4800" # 'int' : forcing value to bool 'true' or 'false'
-              # (performance warning)
-      "C4820" # 'bytes' bytes padding added after construct 'member_name'
-      "C5026" # move constructor was implicitly defined as deleted
-      "C5027" # move assignment operator was implicitly defined as deleted
-      )
-  set(MSVC_LEVEL4_WARNINGS_LIST
-      # See https://connect.microsoft.com/VisualStudio/feedback/details/1217660/warning-c4265-when-using-functional-header
-      "C4265" # class has virtual functions, but destructor is not virtual
-      )
-  string(REPLACE "C" " -wd" MSVC_DISABLED_WARNINGS_STR
-                            ${MSVC_DISABLED_WARNINGS_LIST})
-  string(REPLACE "C" " -w4" MSVC_LEVEL4_WARNINGS_STR
-                            ${MSVC_LEVEL4_WARNINGS_LIST})
-  set(CMAKE_C_FLAGS   "-Wall -WX ${MSVC_DISABLED_WARNINGS_STR} ${MSVC_LEVEL4_WARNINGS_STR}")
-  set(CMAKE_CXX_FLAGS "-Wall -WX ${MSVC_DISABLED_WARNINGS_STR} ${MSVC_LEVEL4_WARNINGS_STR}")
-  set(CMAKE_ASM_NASM_FLAGS "-g cv8")
-  add_definitions(-D_HAS_EXCEPTIONS=0)
-  add_definitions(-DWIN32_LEAN_AND_MEAN)
-  add_definitions(-DNOMINMAX)
-  add_definitions(-D_CRT_SECURE_NO_WARNINGS) # Allow use of fopen
+if ( ANDROID )
+  set ( BUILD_SHARED_LIBS ON )
+elseif ( IOS )
+  set ( BUILD_SHARED_LIBS OFF )
 endif()
-
-if((CMAKE_COMPILER_IS_GNUCXX AND CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.7.99") OR
-   CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wshadow")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshadow")
-endif()
-
-if(CMAKE_COMPILER_IS_GNUCXX)
-  if ((CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.8.99") OR
-      CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
-  else()
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
-  endif()
-endif()
-
-# pthread_rwlock_t requires a feature flag.
-if(NOT WIN32)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_XOPEN_SOURCE=700")
-endif()
-
-if(FUZZ)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "You need to build with Clang for fuzzing to work")
-  endif()
-
-  add_definitions(-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE)
-  set(RUNNER_ARGS "-deterministic")
-
-  if(NOT NO_FUZZER_MODE)
-    add_definitions(-DBORINGSSL_UNSAFE_FUZZER_MODE)
-    set(RUNNER_ARGS ${RUNNER_ARGS} "-fuzzer" "-shim-config" "fuzzer_mode.json")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-coverage=edge,indirect-calls,8bit-counters")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-coverage=edge,indirect-calls,8bit-counters")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
-  link_directories(.)
-endif()
-
-add_definitions(-DBORINGSSL_IMPLEMENTATION)
-
-if (BUILD_SHARED_LIBS)
-  add_definitions(-DBORINGSSL_SHARED_LIBRARY)
-  # Enable position-independent code globally. This is needed because
-  # some library targets are OBJECT libraries.
-  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-endif()
-
-if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-  set(ARCH "x86_64")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "amd64")
-  set(ARCH "x86_64")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
-  # cmake reports AMD64 on Windows, but we might be building for 32-bit.
-  if (CMAKE_CL_64)
-    set(ARCH "x86_64")
-  else()
-    set(ARCH "x86")
-  endif()
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86")
-  set(ARCH "x86")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i386")
-  set(ARCH "x86")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i686")
-  set(ARCH "x86")
-elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^arm*")
-  set(ARCH "arm")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
-  set(ARCH "aarch64")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "mips")
-  # Just to avoid the “unknown processor” error.
-  set(ARCH "generic")
-elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "ppc64le")
-  set(ARCH "ppc64le")
-else()
-  message(FATAL_ERROR "Unknown processor:" ${CMAKE_SYSTEM_PROCESSOR})
-endif()
-
-if (ANDROID AND ${ARCH} STREQUAL "arm")
-  # The Android-NDK CMake files somehow fail to set the -march flag for
-  # assembly files. Without this flag, the compiler believes that it's
-  # building for ARMv5.
-  set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -march=${CMAKE_SYSTEM_PROCESSOR}")
-endif()
-
-if (${ARCH} STREQUAL "x86" AND APPLE)
-  # With CMake 2.8.x, ${CMAKE_SYSTEM_PROCESSOR} evalutes to i386 on OS X,
-  # but clang defaults to 64-bit builds on OS X unless otherwise told.
-  # Set ARCH to x86_64 so clang and CMake agree. This is fixed in CMake 3.
-  set(ARCH "x86_64")
-endif()
-
-if (MSAN)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "Cannot enable MSAN unless using Clang")
-  endif()
-
-  if (ASAN)
-    message(FATAL_ERROR "ASAN and MSAN are mutually exclusive")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-  set(OPENSSL_NO_ASM "1")
-endif()
-
-if (ASAN)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "Cannot enable ASAN unless using Clang")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
-  set(OPENSSL_NO_ASM "1")
-endif()
-
-if (GCOV)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-endif()
-
-if (OPENSSL_NO_ASM)
-  add_definitions(-DOPENSSL_NO_ASM)
-  set(ARCH "generic")
-endif()
-
-# Add minimal googletest targets. The provided one has many side-effects, and
-# googletest has a very straightforward build.
-#add_library(gtest third_party/googletest/src/gtest-all.cc)
-#target_include_directories(gtest PRIVATE third_party/googletest)
-
-#include_directories(third_party/googletest/include)
-
-# Declare a dummy target to build all unit tests. Test targets should inject
-# themselves as dependencies next to the target definition.
-add_custom_target(all_tests)
 
 add_subdirectory(crypto)
 add_subdirectory(ssl)
-#add_subdirectory(test)
-#add_subdirectory(tool)
-#add_subdirectory(decrepit)
 
-if(FUZZ)
-  add_subdirectory(fuzz)
+if(WITH_APPS AND NOT ANDROID AND NOT IOS)
+  add_subdirectory(apps)
 endif()
 
-if (NOT ${CMAKE_VERSION} VERSION_LESS "3.2")
-  # USES_TERMINAL is only available in CMake 3.2 or later.
-  set(MAYBE_USES_TERMINAL USES_TERMINAL)
-endif()
+file( COPY ${PROJECT_SOURCE_DIR}/include/internal DESTINATION include )
+file( COPY ${PROJECT_SOURCE_DIR}/include/openssl DESTINATION include )
 
-add_custom_target(
-    run_tests
-    COMMAND ${GO_EXECUTABLE} run util/all_tests.go -build-dir
-            ${CMAKE_BINARY_DIR}
-    COMMAND cd ssl/test/runner &&
-            ${GO_EXECUTABLE} test -shim-path
-              ${RUNNER_ARGS}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    DEPENDS all_tests
-    ${MAYBE_USES_TERMINAL})
+configure_file( ${PROJECT_SOURCE_DIR}/opensslconf.h.cmake
+  ${PROJECT_BINARY_DIR}/include/openssl/opensslconf.h )
+
+file( READ ${PROJECT_SOURCE_DIR}/c_rehash.cmake C_REHASH )
+string( REPLACE "@OPENSSLDIR@" "${OPENSSLDIR}" C_REHASH "${C_REHASH}" )
+string( REPLACE "@CMAKE_INSTALL_PREFIX@" "${CMAKE_INSTALL_PREFIX}" C_REHASH "${C_REHASH}" )
+file( WRITE ${PROJECT_BINARY_DIR}/c_rehash "${C_REHASH}" )
+
+install( DIRECTORY ${PROJECT_BINARY_DIR}/include/openssl DESTINATION include )
+
+install( FILES
+  ${PROJECT_BINARY_DIR}/c_rehash
+  FAQ LICENSE README README.ENGINE
+  DESTINATION share/openssl )
+
+install( DIRECTORY doc DESTINATION share )
+
+# Generate the package target
+set( CPACK_GENERATOR ZIP TGZ )
+set( CPACK_PACKAGE_NAME "openssl-cmake" )
+set( CPACK_PACKAGE_VERSION_MAJOR ${VERSION_MAJOR} )
+set( CPACK_PACKAGE_VERSION_MINOR ${VERSION_MINOR} )
+set( CPACK_PACKAGE_VERSION_PATCH ${VERSION_PATCH} )
+
+include( CPack )
+

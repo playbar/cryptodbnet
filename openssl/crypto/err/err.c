@@ -828,8 +828,7 @@ void ERR_add_error_data(int num, ...)
 void ERR_add_error_vdata(int num, va_list args)
 {
     int i, n, s;
-    char *str, *p;
-    const char *a;
+    char *str, *p, *a;
 
     s = 80;
     if ((str = OPENSSL_malloc(s + 1)) == NULL) {
