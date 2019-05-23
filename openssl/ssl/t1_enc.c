@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2019 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright 2005 Nokia. All rights reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
@@ -81,10 +81,6 @@ static int tls1_generate_key_block(SSL *s, unsigned char *km, size_t num)
 int tls1_change_cipher_state(SSL *s, int which)
 {
     unsigned char *p, *mac_secret;
-    unsigned char tmp1[EVP_MAX_KEY_LENGTH];
-    unsigned char tmp2[EVP_MAX_KEY_LENGTH];
-    unsigned char iv1[EVP_MAX_IV_LENGTH * 2];
-    unsigned char iv2[EVP_MAX_IV_LENGTH * 2];
     unsigned char *ms, *key, *iv;
     EVP_CIPHER_CTX *dd;
     const EVP_CIPHER *c;
@@ -154,7 +150,7 @@ int tls1_change_cipher_state(SSL *s, int which)
         mac_secret = &(s->s3->read_mac_secret[0]);
         mac_secret_size = &(s->s3->read_mac_secret_size);
     } else {
-        s->statem.invalid_enc_write_ctx = 1;
+        s->statem.enc_write_state = ENC_WRITE_STATE_INVALID;
         if (s->ext.use_etm)
             s->s3->flags |= TLS1_FLAGS_ENCRYPT_THEN_MAC_WRITE;
         else
@@ -316,7 +312,7 @@ int tls1_change_cipher_state(SSL *s, int which)
                  ERR_R_INTERNAL_ERROR);
         goto err;
     }
-    s->statem.invalid_enc_write_ctx = 0;
+    s->statem.enc_write_state = ENC_WRITE_STATE_VALID;
 
 #ifdef SSL_DEBUG
     printf("which = %04X\nkey=", which);
@@ -334,16 +330,8 @@ int tls1_change_cipher_state(SSL *s, int which)
     printf("\n");
 #endif
 
-    OPENSSL_cleanse(tmp1, sizeof(tmp1));
-    OPENSSL_cleanse(tmp2, sizeof(tmp1));
-    OPENSSL_cleanse(iv1, sizeof(iv1));
-    OPENSSL_cleanse(iv2, sizeof(iv2));
     return 1;
  err:
-    OPENSSL_cleanse(tmp1, sizeof(tmp1));
-    OPENSSL_cleanse(tmp2, sizeof(tmp1));
-    OPENSSL_cleanse(iv1, sizeof(iv1));
-    OPENSSL_cleanse(iv2, sizeof(iv2));
     return 0;
 }
 

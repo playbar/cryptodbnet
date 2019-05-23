@@ -342,7 +342,10 @@ int ssl3_get_record(SSL *s)
                 if (SSL_IS_TLS13(s) && s->enc_read_ctx != NULL) {
                     if (thisrr->type != SSL3_RT_APPLICATION_DATA
                             && (thisrr->type != SSL3_RT_CHANGE_CIPHER_SPEC
-                                || !SSL_IS_FIRST_HANDSHAKE(s))) {
+                                || !SSL_IS_FIRST_HANDSHAKE(s))
+                            && (thisrr->type != SSL3_RT_ALERT
+                                || s->statem.enc_read_state
+                                   != ENC_READ_STATE_ALLOW_PLAIN_ALERTS)) {
                         SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE,
                                  SSL_F_SSL3_GET_RECORD, SSL_R_BAD_RECORD_TYPE);
                         return -1;
@@ -692,7 +695,9 @@ int ssl3_get_record(SSL *s)
             }
         }
 
-        if (SSL_IS_TLS13(s) && s->enc_read_ctx != NULL) {
+        if (SSL_IS_TLS13(s)
+                && s->enc_read_ctx != NULL
+                && thisrr->type != SSL3_RT_ALERT) {
             size_t end;
 
             if (thisrr->length == 0
@@ -2024,4 +2029,29 @@ int dtls1_get_record(SSL *s)
 
     return 1;
 
+}
+
+int dtls_buffer_listen_record(SSL *s, size_t len, unsigned char *seq, size_t off)
+{
+    SSL3_RECORD *rr;
+
+    rr = RECORD_LAYER_get_rrec(&s->rlayer);
+    memset(rr, 0, sizeof(SSL3_RECORD));
+
+    rr->length = len;
+    rr->type = SSL3_RT_HANDSHAKE;
+    memcpy(rr->seq_num, seq, sizeof(rr->seq_num));
+    rr->off = off;
+
+    s->rlayer.packet = RECORD_LAYER_get_rbuf(&s->rlayer)->buf;
+    s->rlayer.packet_length = DTLS1_RT_HEADER_LENGTH + len;
+    rr->data = s->rlayer.packet + DTLS1_RT_HEADER_LENGTH;
+
+    if (dtls1_buffer_record(s, &(s->rlayer.d->processed_rcds),
+                            SSL3_RECORD_get_seq_num(s->rlayer.rrec)) <= 0) {
+        /* SSLfatal() already called */
+        return 0;
+    }
+
+    return 1;
 }

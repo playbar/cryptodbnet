@@ -1,5 +1,5 @@
 /*
- * Copyright 2001-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2001-2019 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -75,14 +75,10 @@ int engine_free_util(ENGINE *e, int not_locked)
 
     if (e == NULL)
         return 1;
-#ifdef HAVE_ATOMICS
-    CRYPTO_DOWN_REF(&e->struct_ref, &i, global_engine_lock);
-#else
     if (not_locked)
-        CRYPTO_atomic_add(&e->struct_ref, -1, &i, global_engine_lock);
+        CRYPTO_DOWN_REF(&e->struct_ref, &i, global_engine_lock);
     else
         i = --e->struct_ref;
-#endif
     engine_ref_debug(e, 0, -1);
     if (i > 0)
         return 1;
@@ -128,7 +124,7 @@ static int int_cleanup_check(int create)
 static ENGINE_CLEANUP_ITEM *int_cleanup_item(ENGINE_CLEANUP_CB *cb)
 {
     ENGINE_CLEANUP_ITEM *item;
-    
+
     if ((item = OPENSSL_malloc(sizeof(*item))) == NULL) {
         ENGINEerr(ENGINE_F_INT_CLEANUP_ITEM, ERR_R_MALLOC_FAILURE);
         return NULL;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2006-2019 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -15,6 +15,7 @@
 #include "internal/asn1_int.h"
 #include "internal/evp_int.h"
 #include "ec_lcl.h"
+#include "curve448/curve448_lcl.h"
 
 #define X25519_BITS          253
 #define X25519_SECURITY_BITS 128
@@ -331,8 +332,18 @@ static int ecx_ctrl(EVP_PKEY *pkey, int op, long arg1, void *arg2)
         }
         return 0;
 
+    default:
+        return -2;
+
+    }
+}
+
+static int ecd_ctrl(EVP_PKEY *pkey, int op, long arg1, void *arg2)
+{
+    switch (op) {
     case ASN1_PKEY_CTRL_DEFAULT_MD_NID:
-        *(int *)arg2 = NID_sha256;
+        /* We currently only support Pure EdDSA which takes no digest */
+        *(int *)arg2 = NID_undef;
         return 2;
 
     default:
@@ -579,7 +590,7 @@ const EVP_PKEY_ASN1_METHOD ed25519_asn1_meth = {
     0, 0,
 
     ecx_free,
-    0,
+    ecd_ctrl,
     NULL,
     NULL,
     ecd_item_verify,
@@ -621,7 +632,7 @@ const EVP_PKEY_ASN1_METHOD ed448_asn1_meth = {
     0, 0,
 
     ecx_free,
-    0,
+    ecd_ctrl,
     NULL,
     NULL,
     ecd_item_verify,

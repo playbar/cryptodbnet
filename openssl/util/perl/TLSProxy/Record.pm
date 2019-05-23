@@ -1,4 +1,4 @@
-# Copyright 2016-2018 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2016-2019 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the OpenSSL license (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -36,7 +36,6 @@ my %record_type = (
 
 use constant {
     VERS_TLS_1_4 => 0x0305,
-    VERS_TLS_1_3_DRAFT => 0x7f1c,
     VERS_TLS_1_3 => 0x0304,
     VERS_TLS_1_2 => 0x0303,
     VERS_TLS_1_1 => 0x0302,
@@ -97,7 +96,9 @@ sub get_records
             $data       # decrypt_data
         );
 
-        if ($content_type != RT_CCS) {
+        if ($content_type != RT_CCS
+                && (!TLSProxy::Proxy->is_tls13()
+                    || $content_type != RT_ALERT)) {
             if (($server && $server_encrypting)
                      || (!$server && $client_encrypting)) {
                 if (!TLSProxy::Proxy->is_tls13() && $etm) {
@@ -172,7 +173,7 @@ sub new
         $decrypt_len,
         $data,
         $decrypt_data) = @_;
-    
+
     my $self = {
         flight => $flight,
         content_type => $content_type,

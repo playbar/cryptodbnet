@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2016-2019 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -348,10 +348,12 @@ static const EXTENSION_DEFINITION ext_defs[] = {
     {
         /*
          * Special unsolicited ServerHello extension only used when
-         * SSL_OP_CRYPTOPRO_TLSEXT_BUG is set
+         * SSL_OP_CRYPTOPRO_TLSEXT_BUG is set. We allow it in a ClientHello but
+         * ignore it.
          */
         TLSEXT_TYPE_cryptopro_bug,
-        SSL_EXT_TLS1_2_SERVER_HELLO | SSL_EXT_TLS1_2_AND_BELOW_ONLY,
+        SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO
+        | SSL_EXT_TLS1_2_AND_BELOW_ONLY,
         NULL, NULL, NULL, tls_construct_stoc_cryptopro_bug, NULL, NULL
     },
     {
@@ -623,7 +625,12 @@ int tls_collect_extensions(SSL *s, PACKET *packet, unsigned int context,
                 && type != TLSEXT_TYPE_cookie
                 && type != TLSEXT_TYPE_renegotiate
                 && type != TLSEXT_TYPE_signed_certificate_timestamp
-                && (s->ext.extflags[idx] & SSL_EXT_FLAG_SENT) == 0) {
+                && (s->ext.extflags[idx] & SSL_EXT_FLAG_SENT) == 0
+#ifndef OPENSSL_NO_GOST
+                && !((context & SSL_EXT_TLS1_2_SERVER_HELLO) != 0
+                     && type == TLSEXT_TYPE_cryptopro_bug)
+#endif
+								) {
             SSLfatal(s, SSL_AD_UNSUPPORTED_EXTENSION,
                      SSL_F_TLS_COLLECT_EXTENSIONS, SSL_R_UNSOLICITED_EXTENSION);
             goto err;
@@ -810,7 +817,7 @@ int tls_construct_extensions(SSL *s, WPACKET *pkt, unsigned int context,
     }
 
     if ((context & SSL_EXT_CLIENT_HELLO) != 0) {
-        reason = ssl_get_min_max_version(s, &min_version, &max_version);
+        reason = ssl_get_min_max_version(s, &min_version, &max_version, NULL);
         if (reason != 0) {
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_CONSTRUCT_EXTENSIONS,
                      reason);
@@ -904,15 +911,19 @@ static int final_renegotiate(SSL *s, unsigned int context, int sent)
 
 static int init_server_name(SSL *s, unsigned int context)
 {
-    if (s->server)
+    if (s->server) {
         s->servername_done = 0;
+
+        OPENSSL_free(s->ext.hostname);
+        s->ext.hostname = NULL;
+    }
 
     return 1;
 }
 
 static int final_server_name(SSL *s, unsigned int context, int sent)
 {
-    int ret = SSL_TLSEXT_ERR_NOACK, discard;
+    int ret = SSL_TLSEXT_ERR_NOACK;
     int altmp = SSL_AD_UNRECOGNIZED_NAME;
     int was_ticket = (SSL_get_options(s) & SSL_OP_NO_TICKET) == 0;
 
@@ -938,11 +949,8 @@ static int final_server_name(SSL *s, unsigned int context, int sent)
      * was successful.
      */
     if (s->server) {
-        if (!sent) {
-            /* Nothing from the client this handshake; cleanup stale value */
-            OPENSSL_free(s->ext.hostname);
-            s->ext.hostname = NULL;
-        } else if (ret == SSL_TLSEXT_ERR_OK && (!s->hit || SSL_IS_TLS13(s))) {
+        /* TODO(OpenSSL1.2) revisit !sent case */
+        if (sent && ret == SSL_TLSEXT_ERR_OK && (!s->hit || SSL_IS_TLS13(s))) {
             /* Only store the hostname in the session if we accepted it. */
             OPENSSL_free(s->session->ext.hostname);
             s->session->ext.hostname = OPENSSL_strdup(s->ext.hostname);
@@ -960,10 +968,8 @@ static int final_server_name(SSL *s, unsigned int context, int sent)
      * exceed sess_accept (zero) for the new context.
      */
     if (SSL_IS_FIRST_HANDSHAKE(s) && s->ctx != s->session_ctx) {
-        CRYPTO_atomic_add(&s->ctx->stats.sess_accept, 1, &discard,
-                          s->ctx->lock);
-        CRYPTO_atomic_add(&s->session_ctx->stats.sess_accept, -1, &discard,
-                          s->session_ctx->lock);
+        tsan_counter(&s->ctx->stats.sess_accept);
+        tsan_decr(&s->session_ctx->stats.sess_accept);
     }
 
     /*
@@ -1199,7 +1205,7 @@ static EXT_RETURN tls_construct_certificate_authorities(SSL *s, WPACKET *pkt,
                                                         X509 *x,
                                                         size_t chainidx)
 {
-    const STACK_OF(X509_NAME) *ca_sk = SSL_get0_CA_list(s);
+    const STACK_OF(X509_NAME) *ca_sk = get_ca_names(s);
 
     if (ca_sk == NULL || sk_X509_NAME_num(ca_sk) == 0)
         return EXT_RETURN_NOT_SENT;
@@ -1212,7 +1218,7 @@ static EXT_RETURN tls_construct_certificate_authorities(SSL *s, WPACKET *pkt,
         return EXT_RETURN_FAIL;
     }
 
-    if (!construct_ca_names(s, pkt)) {
+    if (!construct_ca_names(s, ca_sk, pkt)) {
         /* SSLfatal() already called */
         return EXT_RETURN_FAIL;
     }
@@ -1507,7 +1513,7 @@ int tls_psk_do_binder(SSL *s, const EVP_MD *md, const unsigned char *msgstart,
 
     /* Generate the binder key */
     if (!tls13_hkdf_expand(s, md, early_secret, label, labelsize, hash,
-                           hashsize, binderkey, hashsize)) {
+                           hashsize, binderkey, hashsize, 1)) {
         /* SSLfatal() already called */
         goto err;
     }
@@ -1531,10 +1537,12 @@ int tls_psk_do_binder(SSL *s, const EVP_MD *md, const unsigned char *msgstart,
      */
     if (s->hello_retry_request == SSL_HRR_PENDING) {
         size_t hdatalen;
+        long hdatalen_l;
         void *hdata;
 
-        hdatalen = BIO_get_mem_data(s->s3->handshake_buffer, &hdata);
-        if (hdatalen <= 0) {
+        hdatalen = hdatalen_l =
+            BIO_get_mem_data(s->s3->handshake_buffer, &hdata);
+        if (hdatalen_l <= 0) {
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PSK_DO_BINDER,
                      SSL_R_BAD_HANDSHAKE_LENGTH);
             goto err;

@@ -343,6 +343,10 @@ int tls1_set_groups(uint16_t **pext, size_t *pextlen,
      */
     unsigned long dup_list = 0;
 
+    if (ngroups == 0) {
+        SSLerr(SSL_F_TLS1_SET_GROUPS, SSL_R_BAD_LENGTH);
+        return 0;
+    }
     if ((glist = OPENSSL_malloc(ngroups * sizeof(*glist))) == NULL) {
         SSLerr(SSL_F_TLS1_SET_GROUPS, ERR_R_MALLOC_FAILURE);
         return 0;
@@ -945,6 +949,39 @@ size_t tls12_get_psigalgs(SSL *s, int sent, const uint16_t **psigs)
     }
 }
 
+#ifndef OPENSSL_NO_EC
+/*
+ * Called by servers only. Checks that we have a sig alg that supports the
+ * specified EC curve.
+ */
+int tls_check_sigalg_curve(const SSL *s, int curve)
+{
+   const uint16_t *sigs;
+   size_t siglen, i;
+
+    if (s->cert->conf_sigalgs) {
+        sigs = s->cert->conf_sigalgs;
+        siglen = s->cert->conf_sigalgslen;
+    } else {
+        sigs = tls12_sigalgs;
+        siglen = OSSL_NELEM(tls12_sigalgs);
+    }
+
+    for (i = 0; i < siglen; i++) {
+        const SIGALG_LOOKUP *lu = tls1_lookup_sigalg(sigs[i]);
+
+        if (lu == NULL)
+            continue;
+        if (lu->sig == EVP_PKEY_EC
+                && lu->curve != NID_undef
+                && curve == lu->curve)
+            return 1;
+    }
+
+    return 0;
+}
+#endif
+
 /*
  * Check signature algorithm is consistent with sent supported signature
  * algorithms and if so set relevant digest and signature scheme in
@@ -1087,6 +1124,14 @@ int SSL_get_peer_signature_type_nid(const SSL *s, int *pnid)
     return 1;
 }
 
+int SSL_get_signature_type_nid(const SSL *s, int *pnid)
+{
+    if (s->s3->tmp.sigalg == NULL)
+        return 0;
+    *pnid = s->s3->tmp.sigalg->sig;
+    return 1;
+}
+
 /*
  * Set a mask of disabled algorithms: an algorithm is disabled if it isn't
  * supported, doesn't appear in supported signature algorithms, isn't supported
@@ -1103,7 +1148,7 @@ int ssl_set_client_disabled(SSL *s)
     s->s3->tmp.mask_k = 0;
     ssl_set_sig_mask(&s->s3->tmp.mask_a, s, SSL_SECOP_SIGALG_MASK);
     if (ssl_get_min_max_version(s, &s->s3->tmp.min_ver,
-                                &s->s3->tmp.max_ver) != 0)
+                                &s->s3->tmp.max_ver, NULL) != 0)
         return 0;
 #ifndef OPENSSL_NO_PSK
     /* with PSK there must be client callback set */
@@ -2473,7 +2518,10 @@ static int tls12_get_cert_sigalg_idx(const SSL *s, const SIGALG_LOOKUP *lu)
     const SSL_CERT_LOOKUP *clu = ssl_cert_lookup_by_idx(sig_idx);
 
     /* If not recognised or not supported by cipher mask it is not suitable */
-    if (clu == NULL || !(clu->amask & s->s3->tmp.new_cipher->algorithm_auth))
+    if (clu == NULL
+            || (clu->amask & s->s3->tmp.new_cipher->algorithm_auth) == 0
+            || (clu->nid == EVP_PKEY_RSA_PSS
+                && (s->s3->tmp.new_cipher->algorithm_mkey & SSL_kRSA) != 0))
         return -1;
 
     return s->s3->tmp.valid_flags[sig_idx] & CERT_PKEY_VALID ? sig_idx : -1;
@@ -2489,7 +2537,8 @@ static int tls12_get_cert_sigalg_idx(const SSL *s, const SIGALG_LOOKUP *lu)
 static int has_usable_cert(SSL *s, const SIGALG_LOOKUP *sig, int idx)
 {
     const SIGALG_LOOKUP *lu;
-    int mdnid, pknid;
+    int mdnid, pknid, default_mdnid;
+    int mandatory_md = 0;
     size_t i;
 
     /* TLS 1.2 callers can override lu->sig_idx, but not TLS 1.3 callers. */
@@ -2497,12 +2546,26 @@ static int has_usable_cert(SSL *s, const SIGALG_LOOKUP *sig, int idx)
         idx = sig->sig_idx;
     if (!ssl_has_cert(s, idx))
         return 0;
+    /* If the EVP_PKEY reports a mandatory digest, allow nothing else. */
+    ERR_set_mark();
+    switch (EVP_PKEY_get_default_digest_nid(s->cert->pkeys[idx].privatekey,
+                                            &default_mdnid)) {
+    case 2:
+        mandatory_md = 1;
+        break;
+    case 1:
+        break;
+    default: /* If it didn't report a mandatory NID, for whatever reasons,
+              * just clear the error and allow all hashes to be used. */
+        ERR_pop_to_mark();
+    }
     if (s->s3->tmp.peer_cert_sigalgs != NULL) {
         for (i = 0; i < s->s3->tmp.peer_cert_sigalgslen; i++) {
             lu = tls1_lookup_sigalg(s->s3->tmp.peer_cert_sigalgs[i]);
             if (lu == NULL
                 || !X509_get_signature_info(s->cert->pkeys[idx].x509, &mdnid,
-                                            &pknid, NULL, NULL))
+                                            &pknid, NULL, NULL)
+                || (mandatory_md && mdnid != default_mdnid))
                 continue;
             /*
              * TODO this does not differentiate between the
@@ -2515,7 +2578,7 @@ static int has_usable_cert(SSL *s, const SIGALG_LOOKUP *sig, int idx)
         }
         return 0;
     }
-    return 1;
+    return !mandatory_md || sig->hash == default_mdnid;
 }
 
 /*
@@ -2643,8 +2706,9 @@ int tls_choose_sigalg(SSL *s, int fatalerrs)
                 if (i == s->cert->shared_sigalgslen) {
                     if (!fatalerrs)
                         return 1;
-                    SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_CHOOSE_SIGALG,
-                             ERR_R_INTERNAL_ERROR);
+                    SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
+                             SSL_F_TLS_CHOOSE_SIGALG,
+                             SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
                     return 0;
                 }
             } else {

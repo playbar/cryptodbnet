@@ -1,5 +1,5 @@
 /*
- * Copyright 2001-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2001-2019 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
@@ -15,7 +15,6 @@
 #include <openssl/bn.h>
 #include "internal/refcount.h"
 #include "internal/ec_int.h"
-#include "curve448/curve448_lcl.h"
 
 #if defined(__SUNPRO_C)
 # if __SUNPRO_C >= 0x520
@@ -50,8 +49,7 @@ struct ec_method_st {
     void (*group_finish) (EC_GROUP *);
     void (*group_clear_finish) (EC_GROUP *);
     int (*group_copy) (EC_GROUP *, const EC_GROUP *);
-    /* used by EC_GROUP_set_curve_GFp, EC_GROUP_get_curve_GFp, */
-    /* EC_GROUP_set_curve_GF2m, and EC_GROUP_get_curve_GF2m: */
+    /* used by EC_GROUP_set_curve, EC_GROUP_get_curve: */
     int (*group_set_curve) (EC_GROUP *, const BIGNUM *p, const BIGNUM *a,
                             const BIGNUM *b, BN_CTX *);
     int (*group_get_curve) (const EC_GROUP *, BIGNUM *p, BIGNUM *a, BIGNUM *b,
@@ -73,9 +71,9 @@ struct ec_method_st {
      * used by EC_POINT_set_to_infinity,
      * EC_POINT_set_Jprojective_coordinates_GFp,
      * EC_POINT_get_Jprojective_coordinates_GFp,
-     * EC_POINT_set_affine_coordinates_GFp,     ..._GF2m,
-     * EC_POINT_get_affine_coordinates_GFp,     ..._GF2m,
-     * EC_POINT_set_compressed_coordinates_GFp, ..._GF2m:
+     * EC_POINT_set_affine_coordinates,
+     * EC_POINT_get_affine_coordinates,
+     * EC_POINT_set_compressed_coordinates:
      */
     int (*point_set_to_infinity) (const EC_GROUP *, EC_POINT *);
     int (*point_set_Jprojective_coordinates_GFp) (const EC_GROUP *,
@@ -155,6 +153,13 @@ struct ec_method_st {
     int (*field_sqr) (const EC_GROUP *, BIGNUM *r, const BIGNUM *a, BN_CTX *);
     int (*field_div) (const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                       const BIGNUM *b, BN_CTX *);
+    /*-
+     * 'field_inv' computes the multipicative inverse of a in the field,
+     * storing the result in r.
+     *
+     * If 'a' is zero (or equivalent), you'll get an EC_R_CANNOT_INVERT error.
+     */
+    int (*field_inv) (const EC_GROUP *, BIGNUM *r, const BIGNUM *a, BN_CTX *);
     /* e.g. to Montgomery */
     int (*field_encode) (const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                          BN_CTX *);
@@ -391,6 +396,8 @@ int ec_GFp_simple_field_mul(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                             const BIGNUM *b, BN_CTX *);
 int ec_GFp_simple_field_sqr(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                             BN_CTX *);
+int ec_GFp_simple_field_inv(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
+                            BN_CTX *);
 int ec_GFp_simple_blind_coordinates(const EC_GROUP *group, EC_POINT *p,
                                     BN_CTX *ctx);
 int ec_GFp_simple_ladder_pre(const EC_GROUP *group,
@@ -413,6 +420,8 @@ int ec_GFp_mont_group_copy(EC_GROUP *, const EC_GROUP *);
 int ec_GFp_mont_field_mul(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                           const BIGNUM *b, BN_CTX *);
 int ec_GFp_mont_field_sqr(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
+                          BN_CTX *);
+int ec_GFp_mont_field_inv(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                           BN_CTX *);
 int ec_GFp_mont_field_encode(const EC_GROUP *, BIGNUM *r, const BIGNUM *a,
                              BN_CTX *);

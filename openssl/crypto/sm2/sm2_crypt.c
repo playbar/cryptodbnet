@@ -11,6 +11,7 @@
 
 #include "internal/sm2.h"
 #include "internal/sm2err.h"
+#include "internal/ec_int.h" /* ecdh_KDF_X9_63() */
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/bn.h>
@@ -48,7 +49,7 @@ static size_t ec_field_size(const EC_GROUP *group)
     if (p == NULL || a == NULL || b == NULL)
        goto done;
 
-    if (!EC_GROUP_get_curve_GFp(group, p, a, b, NULL))
+    if (!EC_GROUP_get_curve(group, p, a, b, NULL))
         goto done;
     field_size = (BN_num_bits(p) + 7) / 8;
 
@@ -91,11 +92,18 @@ int sm2_ciphertext_size(const EC_KEY *key, const EVP_MD *digest, size_t msg_len,
 {
     const size_t field_size = ec_field_size(EC_KEY_get0_group(key));
     const int md_size = EVP_MD_size(digest);
+    size_t sz;
 
     if (field_size == 0 || md_size < 0)
         return 0;
 
-    *ct_size = 12 + 2 * field_size + (size_t)md_size + msg_len;
+    /* Integer and string are simple type; set constructed = 0, means primitive and definite length encoding. */
+    sz = 2 * ASN1_object_size(0, field_size + 1, V_ASN1_INTEGER)
+         + ASN1_object_size(0, md_size, V_ASN1_OCTET_STRING)
+         + ASN1_object_size(0, msg_len, V_ASN1_OCTET_STRING);
+    /* Sequence is structured type; set constructed = 1, means constructed and definite length encoding. */
+    *ct_size = ASN1_object_size(1, sz, V_ASN1_SEQUENCE);
+
     return 1;
 }
 
@@ -176,9 +184,9 @@ int sm2_encrypt(const EC_KEY *key,
     }
 
     if (!EC_POINT_mul(group, kG, k, NULL, NULL, ctx)
-            || !EC_POINT_get_affine_coordinates_GFp(group, kG, x1, y1, ctx)
+            || !EC_POINT_get_affine_coordinates(group, kG, x1, y1, ctx)
             || !EC_POINT_mul(group, kP, NULL, P, k, ctx)
-            || !EC_POINT_get_affine_coordinates_GFp(group, kP, x2, y2, ctx)) {
+            || !EC_POINT_get_affine_coordinates(group, kP, x2, y2, ctx)) {
         SM2err(SM2_F_SM2_ENCRYPT, ERR_R_EC_LIB);
         goto done;
     }
@@ -196,7 +204,7 @@ int sm2_encrypt(const EC_KEY *key,
    }
 
     /* X9.63 with no salt happens to match the KDF used in SM2 */
-    if (!ECDH_KDF_X9_62(msg_mask, msg_len, x2y2, 2 * field_size, NULL, 0,
+    if (!ecdh_KDF_X9_63(msg_mask, msg_len, x2y2, 2 * field_size, NULL, 0,
                         digest)) {
         SM2err(SM2_F_SM2_ENCRYPT, ERR_R_EVP_LIB);
         goto done;
@@ -326,18 +334,18 @@ int sm2_decrypt(const EC_KEY *key,
         goto done;
     }
 
-    if (!EC_POINT_set_affine_coordinates_GFp(group, C1, sm2_ctext->C1x,
-                                            sm2_ctext->C1y, ctx)
+    if (!EC_POINT_set_affine_coordinates(group, C1, sm2_ctext->C1x,
+                                         sm2_ctext->C1y, ctx)
             || !EC_POINT_mul(group, C1, NULL, C1, EC_KEY_get0_private_key(key),
                              ctx)
-            || !EC_POINT_get_affine_coordinates_GFp(group, C1, x2, y2, ctx)) {
+            || !EC_POINT_get_affine_coordinates(group, C1, x2, y2, ctx)) {
         SM2err(SM2_F_SM2_DECRYPT, ERR_R_EC_LIB);
         goto done;
     }
 
     if (BN_bn2binpad(x2, x2y2, field_size) < 0
             || BN_bn2binpad(y2, x2y2 + field_size, field_size) < 0
-            || !ECDH_KDF_X9_62(msg_mask, msg_len, x2y2, 2 * field_size, NULL, 0,
+            || !ecdh_KDF_X9_63(msg_mask, msg_len, x2y2, 2 * field_size, NULL, 0,
                                digest)) {
         SM2err(SM2_F_SM2_DECRYPT, ERR_R_INTERNAL_ERROR);
         goto done;

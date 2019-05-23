@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2015-2019 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -73,6 +73,27 @@ static KEY_LIST *public_keys;
 static int find_key(EVP_PKEY **ppk, const char *name, KEY_LIST *lst);
 
 static int parse_bin(const char *value, unsigned char **buf, size_t *buflen);
+
+/*
+ * Compare two memory regions for equality, returning zero if they differ.
+ * However, if there is expected to be an error and the actual error
+ * matches then the memory is expected to be different so handle this
+ * case without producing unnecessary test framework output.
+ */
+static int memory_err_compare(EVP_TEST *t, const char *err,
+                              const void *expected, size_t expected_len,
+                              const void *got, size_t got_len)
+{
+    int r;
+
+    if (t->expected_err != NULL && strcmp(t->expected_err, err) == 0)
+        r = !TEST_mem_ne(expected, expected_len, got, got_len);
+    else
+        r = TEST_mem_eq(expected, expected_len, got, got_len);
+    if (!r)
+        t->err = err;
+    return r;
+}
 
 /*
  * Structure used to hold a list of blocks of memory to test
@@ -397,10 +418,11 @@ static int digest_test_run(EVP_TEST *t)
         t->err = "DIGEST_LENGTH_MISMATCH";
         goto err;
     }
-    if (!TEST_mem_eq(expected->output, expected->output_len, got, got_len)) {
-        t->err = "DIGEST_MISMATCH";
+    if (!memory_err_compare(t, "DIGEST_MISMATCH",
+                            expected->output, expected->output_len,
+                            got, got_len))
         goto err;
-    }
+
     t->err = NULL;
 
  err:
@@ -435,7 +457,7 @@ typedef struct cipher_data_st {
     size_t plaintext_len;
     unsigned char *ciphertext;
     size_t ciphertext_len;
-    /* GCM, CCM only */
+    /* GCM, CCM and OCB only */
     unsigned char *aad;
     size_t aad_len;
     unsigned char *tag;
@@ -463,7 +485,7 @@ static int cipher_test_init(EVP_TEST *t, const char *alg)
     if (m == EVP_CIPH_GCM_MODE
             || m == EVP_CIPH_OCB_MODE
             || m == EVP_CIPH_CCM_MODE)
-        cdat->aead = EVP_CIPHER_mode(cipher);
+        cdat->aead = m;
     else if (EVP_CIPHER_flags(cipher) & EVP_CIPH_FLAG_AEAD_CIPHER)
         cdat->aead = -1;
     else
@@ -688,11 +710,9 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
         t->err = "CIPHERFINAL_ERROR";
         goto err;
     }
-    if (!TEST_mem_eq(expected_out, out_len,
-                     tmp + out_misalign, tmplen + tmpflen)) {
-        t->err = "VALUE_MISMATCH";
+    if (!memory_err_compare(t, "VALUE_MISMATCH", expected_out, out_len,
+                            tmp + out_misalign, tmplen + tmpflen))
         goto err;
-    }
     if (enc && expected->aead) {
         unsigned char rtag[16];
 
@@ -705,11 +725,10 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
             t->err = "TAG_RETRIEVE_ERROR";
             goto err;
         }
-        if (!TEST_mem_eq(expected->tag, expected->tag_len,
-                         rtag, expected->tag_len)) {
-            t->err = "TAG_VALUE_MISMATCH";
+        if (!memory_err_compare(t, "TAG_VALUE_MISMATCH",
+                                expected->tag, expected->tag_len,
+                                rtag, expected->tag_len))
             goto err;
-        }
     }
     t->err = NULL;
     ok = 1;
@@ -824,6 +843,8 @@ typedef struct mac_data_st {
     /* Expected output */
     unsigned char *output;
     size_t output_len;
+    /* Collection of controls */
+    STACK_OF(OPENSSL_STRING) *controls;
 } MAC_DATA;
 
 static int mac_test_init(EVP_TEST *t, const char *alg)
@@ -859,14 +880,22 @@ static int mac_test_init(EVP_TEST *t, const char *alg)
 
     mdat = OPENSSL_zalloc(sizeof(*mdat));
     mdat->type = type;
+    mdat->controls = sk_OPENSSL_STRING_new_null();
     t->data = mdat;
     return 1;
+}
+
+/* Because OPENSSL_free is a macro, it can't be passed as a function pointer */
+static void openssl_free(char *m)
+{
+    OPENSSL_free(m);
 }
 
 static void mac_test_cleanup(EVP_TEST *t)
 {
     MAC_DATA *mdat = t->data;
 
+    sk_OPENSSL_STRING_pop_free(mdat->controls, openssl_free);
     OPENSSL_free(mdat->alg);
     OPENSSL_free(mdat->key);
     OPENSSL_free(mdat->input);
@@ -890,7 +919,32 @@ static int mac_test_parse(EVP_TEST *t,
         return parse_bin(value, &mdata->input, &mdata->input_len);
     if (strcmp(keyword, "Output") == 0)
         return parse_bin(value, &mdata->output, &mdata->output_len);
+    if (strcmp(keyword, "Ctrl") == 0)
+        return sk_OPENSSL_STRING_push(mdata->controls,
+                                      OPENSSL_strdup(value)) != 0;
     return 0;
+}
+
+static int mac_test_ctrl_pkey(EVP_TEST *t, EVP_PKEY_CTX *pctx,
+                              const char *value)
+{
+    int rv;
+    char *p, *tmpval;
+
+    if (!TEST_ptr(tmpval = OPENSSL_strdup(value)))
+        return 0;
+    p = strchr(tmpval, ':');
+    if (p != NULL)
+        *p++ = '\0';
+    rv = EVP_PKEY_CTX_ctrl_str(pctx, tmpval, p);
+    if (rv == -2)
+        t->err = "PKEY_CTRL_INVALID";
+    else if (rv <= 0)
+        t->err = "PKEY_CTRL_ERROR";
+    else
+        rv = 1;
+    OPENSSL_free(tmpval);
+    return rv > 0;
 }
 
 static int mac_test_run(EVP_TEST *t)
@@ -902,6 +956,7 @@ static int mac_test_run(EVP_TEST *t)
     const EVP_MD *md = NULL;
     unsigned char *got = NULL;
     size_t got_len;
+    int i;
 
 #ifdef OPENSSL_NO_DES
     if (expected->alg != NULL && strstr(expected->alg, "DES") != NULL) {
@@ -936,7 +991,13 @@ static int mac_test_run(EVP_TEST *t)
         t->err = "DIGESTSIGNINIT_ERROR";
         goto err;
     }
-
+    for (i = 0; i < sk_OPENSSL_STRING_num(expected->controls); i++)
+        if (!mac_test_ctrl_pkey(t, pctx,
+                                sk_OPENSSL_STRING_value(expected->controls,
+                                                        i))) {
+            t->err = "EVPPKEYCTXCTRL_ERROR";
+            goto err;
+        }
     if (!EVP_DigestSignUpdate(mctx, expected->input, expected->input_len)) {
         t->err = "DIGESTSIGNUPDATE_ERROR";
         goto err;
@@ -950,8 +1011,9 @@ static int mac_test_run(EVP_TEST *t)
         goto err;
     }
     if (!EVP_DigestSignFinal(mctx, got, &got_len)
-            || !TEST_mem_eq(expected->output, expected->output_len,
-                            got, got_len)) {
+            || !memory_err_compare(t, "TEST_MAC_ERR",
+                                   expected->output, expected->output_len,
+                                   got, got_len)) {
         t->err = "TEST_MAC_ERR";
         goto err;
     }
@@ -1108,10 +1170,11 @@ static int pkey_test_run(EVP_TEST *t)
         t->err = "KEYOP_ERROR";
         goto err;
     }
-    if (!TEST_mem_eq(expected->output, expected->output_len, got, got_len)) {
-        t->err = "KEYOP_MISMATCH";
+    if (!memory_err_compare(t, "KEYOP_MISMATCH",
+                            expected->output, expected->output_len,
+                            got, got_len))
         goto err;
-    }
+
     t->err = NULL;
  err:
     OPENSSL_free(got);
@@ -1226,10 +1289,10 @@ static int pderive_test_run(EVP_TEST *t)
         t->err = "DERIVE_ERROR";
         goto err;
     }
-    if (!TEST_mem_eq(expected->output, expected->output_len, got, got_len)) {
-        t->err = "SHARED_SECRET_MISMATCH";
+    if (!memory_err_compare(t, "SHARED_SECRET_MISMATCH",
+                            expected->output, expected->output_len,
+                            got, got_len))
         goto err;
-    }
 
     t->err = NULL;
  err:
@@ -1444,11 +1507,10 @@ static int pbe_test_run(EVP_TEST *t)
             goto err;
         }
     }
-    if (!TEST_mem_eq(expected->key, expected->key_len,
-                     key, expected->key_len)) {
-        t->err = "KEY_MISMATCH";
+    if (!memory_err_compare(t, "KEY_MISMATCH", expected->key, expected->key_len,
+                            key, expected->key_len))
         goto err;
-    }
+
     t->err = NULL;
 err:
     OPENSSL_free(key);
@@ -1497,15 +1559,18 @@ static int encode_test_init(EVP_TEST *t, const char *encoding)
     } else if (strcmp(encoding, "invalid") == 0) {
         edata->encoding = BASE64_INVALID_ENCODING;
         if (!TEST_ptr(t->expected_err = OPENSSL_strdup("DECODE_ERROR")))
-            return 0;
+            goto err;
     } else {
         TEST_error("Bad encoding: %s."
                    " Should be one of {canonical, valid, invalid}",
                    encoding);
-        return 0;
+        goto err;
     }
     t->data = edata;
     return 1;
+err:
+    OPENSSL_free(edata);
+    return 0;
 }
 
 static void encode_test_cleanup(EVP_TEST *t)
@@ -1534,7 +1599,7 @@ static int encode_test_run(EVP_TEST *t)
     ENCODE_DATA *expected = t->data;
     unsigned char *encode_out = NULL, *decode_out = NULL;
     int output_len, chunk_len;
-    EVP_ENCODE_CTX *decode_ctx;
+    EVP_ENCODE_CTX *decode_ctx = NULL, *encode_ctx = NULL;
 
     if (!TEST_ptr(decode_ctx = EVP_ENCODE_CTX_new())) {
         t->err = "INTERNAL_ERROR";
@@ -1542,7 +1607,6 @@ static int encode_test_run(EVP_TEST *t)
     }
 
     if (expected->encoding == BASE64_CANONICAL_ENCODING) {
-        EVP_ENCODE_CTX *encode_ctx;
 
         if (!TEST_ptr(encode_ctx = EVP_ENCODE_CTX_new())
                 || !TEST_ptr(encode_out =
@@ -1550,20 +1614,19 @@ static int encode_test_run(EVP_TEST *t)
             goto err;
 
         EVP_EncodeInit(encode_ctx);
-        EVP_EncodeUpdate(encode_ctx, encode_out, &chunk_len,
-                         expected->input, expected->input_len);
+        if (!TEST_true(EVP_EncodeUpdate(encode_ctx, encode_out, &chunk_len,
+                                        expected->input, expected->input_len)))
+            goto err;
+
         output_len = chunk_len;
 
         EVP_EncodeFinal(encode_ctx, encode_out + chunk_len, &chunk_len);
         output_len += chunk_len;
 
-        EVP_ENCODE_CTX_free(encode_ctx);
-
-        if (!TEST_mem_eq(expected->output, expected->output_len,
-                         encode_out, output_len)) {
-            t->err = "BAD_ENCODING";
+        if (!memory_err_compare(t, "BAD_ENCODING",
+                                expected->output, expected->output_len,
+                                encode_out, output_len))
             goto err;
-        }
     }
 
     if (!TEST_ptr(decode_out =
@@ -1585,8 +1648,9 @@ static int encode_test_run(EVP_TEST *t)
     output_len += chunk_len;
 
     if (expected->encoding != BASE64_INVALID_ENCODING
-            && !TEST_mem_eq(expected->input, expected->input_len,
-                            decode_out, output_len)) {
+            && !memory_err_compare(t, "BAD_DECODING",
+                                   expected->input, expected->input_len,
+                                   decode_out, output_len)) {
         t->err = "BAD_DECODING";
         goto err;
     }
@@ -1596,6 +1660,7 @@ static int encode_test_run(EVP_TEST *t)
     OPENSSL_free(encode_out);
     OPENSSL_free(decode_out);
     EVP_ENCODE_CTX_free(decode_ctx);
+    EVP_ENCODE_CTX_free(encode_ctx);
     return 1;
 }
 
@@ -1687,10 +1752,11 @@ static int kdf_test_run(EVP_TEST *t)
         t->err = "KDF_DERIVE_ERROR";
         goto err;
     }
-    if (!TEST_mem_eq(expected->output, expected->output_len, got, got_len)) {
-        t->err = "KDF_MISMATCH";
+    if (!memory_err_compare(t, "KDF_MISMATCH",
+                            expected->output, expected->output_len,
+                            got, got_len))
         goto err;
-    }
+
     t->err = NULL;
 
  err:
@@ -2079,11 +2145,12 @@ static int digestsign_test_run(EVP_TEST *t)
         t->err = "DIGESTSIGNFINAL_ERROR";
         goto err;
     }
-    if (!TEST_mem_eq(expected->output, expected->output_len, got, got_len)) {
-        t->err = "SIGNATURE_MISMATCH";
+    if (!memory_err_compare(t, "SIGNATURE_MISMATCH",
+                            expected->output, expected->output_len,
+                            got, got_len))
         goto err;
-    }
 
+    t->err = NULL;
  err:
     OPENSSL_free(got);
     return 1;
@@ -2156,11 +2223,12 @@ static int oneshot_digestsign_test_run(EVP_TEST *t)
         t->err = "DIGESTSIGN_ERROR";
         goto err;
     }
-    if (!TEST_mem_eq(expected->output, expected->output_len, got, got_len)) {
-        t->err = "SIGNATURE_MISMATCH";
+    if (!memory_err_compare(t, "SIGNATURE_MISMATCH",
+                            expected->output, expected->output_len,
+                            got, got_len))
         goto err;
-    }
 
+    t->err = NULL;
  err:
     OPENSSL_free(got);
     return 1;
@@ -2570,8 +2638,8 @@ top:
                 return 0;
             }
             if (rv < 0) {
-                TEST_info("Line %d: error processing keyword %s\n",
-                        t->s.curr, pp->key);
+                TEST_info("Line %d: error processing keyword %s = %s\n",
+                          t->s.curr, pp->key, pp->value);
                 return 0;
             }
         }

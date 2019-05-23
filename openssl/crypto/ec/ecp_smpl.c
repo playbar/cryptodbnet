@@ -1,5 +1,5 @@
 /*
- * Copyright 2001-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2001-2019 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
@@ -51,6 +51,7 @@ const EC_METHOD *EC_GFp_simple_method(void)
         ec_GFp_simple_field_mul,
         ec_GFp_simple_field_sqr,
         0 /* field_div */ ,
+        ec_GFp_simple_field_inv,
         0 /* field_encode */ ,
         0 /* field_decode */ ,
         0,                      /* field_set_to_one */
@@ -553,7 +554,7 @@ int ec_GFp_simple_point_get_affine_coordinates(const EC_GROUP *group,
             }
         }
     } else {
-        if (!BN_mod_inverse(Z_1, Z_, group->field, ctx)) {
+        if (!group->meth->field_inv(group, Z_1, Z_, ctx)) {
             ECerr(EC_F_EC_GFP_SIMPLE_POINT_GET_AFFINE_COORDINATES,
                   ERR_R_BN_LIB);
             goto err;
@@ -1181,9 +1182,9 @@ int ec_GFp_simple_make_affine(const EC_GROUP *group, EC_POINT *point,
     if (y == NULL)
         goto err;
 
-    if (!EC_POINT_get_affine_coordinates_GFp(group, point, x, y, ctx))
+    if (!EC_POINT_get_affine_coordinates(group, point, x, y, ctx))
         goto err;
-    if (!EC_POINT_set_affine_coordinates_GFp(group, point, x, y, ctx))
+    if (!EC_POINT_set_affine_coordinates(group, point, x, y, ctx))
         goto err;
     if (!point->Z_is_one) {
         ECerr(EC_F_EC_GFP_SIMPLE_MAKE_AFFINE, ERR_R_INTERNAL_ERROR);
@@ -1266,7 +1267,7 @@ int ec_GFp_simple_points_make_affine(const EC_GROUP *group, size_t num,
      * points[i]->Z by its inverse.
      */
 
-    if (!BN_mod_inverse(tmp, prod_Z[num - 1], group->field, ctx)) {
+    if (!group->meth->field_inv(group, tmp, prod_Z[num - 1], ctx)) {
         ECerr(EC_F_EC_GFP_SIMPLE_POINTS_MAKE_AFFINE, ERR_R_BN_LIB);
         goto err;
     }
@@ -1367,6 +1368,50 @@ int ec_GFp_simple_field_sqr(const EC_GROUP *group, BIGNUM *r, const BIGNUM *a,
                             BN_CTX *ctx)
 {
     return BN_mod_sqr(r, a, group->field, ctx);
+}
+
+/*-
+ * Computes the multiplicative inverse of a in GF(p), storing the result in r.
+ * If a is zero (or equivalent), you'll get a EC_R_CANNOT_INVERT error.
+ * Since we don't have a Mont structure here, SCA hardening is with blinding.
+ */
+int ec_GFp_simple_field_inv(const EC_GROUP *group, BIGNUM *r, const BIGNUM *a,
+                            BN_CTX *ctx)
+{
+    BIGNUM *e = NULL;
+    BN_CTX *new_ctx = NULL;
+    int ret = 0;
+
+    if (ctx == NULL && (ctx = new_ctx = BN_CTX_secure_new()) == NULL)
+        return 0;
+
+    BN_CTX_start(ctx);
+    if ((e = BN_CTX_get(ctx)) == NULL)
+        goto err;
+
+    do {
+        if (!BN_priv_rand_range(e, group->field))
+        goto err;
+    } while (BN_is_zero(e));
+
+    /* r := a * e */
+    if (!group->meth->field_mul(group, r, a, e, ctx))
+        goto err;
+    /* r := 1/(a * e) */
+    if (!BN_mod_inverse(r, r, group->field, ctx)) {
+        ECerr(EC_F_EC_GFP_SIMPLE_FIELD_INV, EC_R_CANNOT_INVERT);
+        goto err;
+    }
+    /* r := e/(a * e) = 1/a */
+    if (!group->meth->field_mul(group, r, r, e, ctx))
+        goto err;
+
+    ret = 1;
+
+ err:
+    BN_CTX_end(ctx);
+    BN_CTX_free(new_ctx);
+    return ret;
 }
 
 /*-
@@ -1483,10 +1528,10 @@ int ec_GFp_simple_ladder_pre(const EC_GROUP *group,
 }
 
 /*-
- * Differential addition-and-doubling using  Eq. (8) and (10) from Izu-Takagi
+ * Differential addition-and-doubling using  Eq. (9) and (10) from Izu-Takagi
  * "A fast parallel elliptic curve multiplication resistant against side channel
  * attacks", as described at
- * https://hyperelliptic.org/EFD/g1p/auto-shortw-xz.html#ladder-ladd-2002-it-3
+ * https://hyperelliptic.org/EFD/g1p/auto-shortw-xz.html#ladder-ladd-2002-it-4
  */
 int ec_GFp_simple_ladder_step(const EC_GROUP *group,
                               EC_POINT *r, EC_POINT *s,
@@ -1511,39 +1556,42 @@ int ec_GFp_simple_ladder_step(const EC_GROUP *group,
         || !group->meth->field_mul(group, t2, r->X, s->Z, ctx)
         || !group->meth->field_mul(group, t3, r->Z, s->X, ctx)
         || !group->meth->field_mul(group, t4, group->a, t1, ctx)
-        || !BN_mod_sub_quick(t4, t0, t4, group->field)
-        || !BN_mod_add_quick(t5, t3, t2, group->field)
-        || !group->meth->field_sqr(group, t4, t4, ctx)
-        || !group->meth->field_mul(group, t5, t1, t5, ctx)
-        || !BN_mod_lshift_quick(t0, group->b, 2, group->field)
-        || !group->meth->field_mul(group, t5, t0, t5, ctx)
-        || !BN_mod_sub_quick(t5, t4, t5, group->field)
+        || !BN_mod_add_quick(t0, t0, t4, group->field)
+        || !BN_mod_add_quick(t4, t3, t2, group->field)
+        || !group->meth->field_mul(group, t0, t4, t0, ctx)
+        || !group->meth->field_sqr(group, t1, t1, ctx)
+        || !BN_mod_lshift_quick(t7, group->b, 2, group->field)
+        || !group->meth->field_mul(group, t1, t7, t1, ctx)
+        || !BN_mod_lshift1_quick(t0, t0, group->field)
+        || !BN_mod_add_quick(t0, t1, t0, group->field)
+        || !BN_mod_sub_quick(t1, t2, t3, group->field)
+        || !group->meth->field_sqr(group, t1, t1, ctx)
+        || !group->meth->field_mul(group, t3, t1, p->X, ctx)
+        || !group->meth->field_mul(group, t0, p->Z, t0, ctx)
         /* s->X coord output */
-        || !group->meth->field_mul(group, s->X, t5, p->Z, ctx)
-        || !BN_mod_sub_quick(t3, t2, t3, group->field)
-        || !group->meth->field_sqr(group, t3, t3, ctx)
+        || !BN_mod_sub_quick(s->X, t0, t3, group->field)
         /* s->Z coord output */
-        || !group->meth->field_mul(group, s->Z, t3, p->X, ctx)
-        || !group->meth->field_sqr(group, t2, r->X, ctx)
-        || !group->meth->field_sqr(group, t4, r->Z, ctx)
-        || !group->meth->field_mul(group, t1, t4, group->a, ctx)
-        || !BN_mod_add_quick(t6, r->X, r->Z, group->field)
+        || !group->meth->field_mul(group, s->Z, p->Z, t1, ctx)
+        || !group->meth->field_sqr(group, t3, r->X, ctx)
+        || !group->meth->field_sqr(group, t2, r->Z, ctx)
+        || !group->meth->field_mul(group, t4, t2, group->a, ctx)
+        || !BN_mod_add_quick(t5, r->X, r->Z, group->field)
+        || !group->meth->field_sqr(group, t5, t5, ctx)
+        || !BN_mod_sub_quick(t5, t5, t3, group->field)
+        || !BN_mod_sub_quick(t5, t5, t2, group->field)
+        || !BN_mod_sub_quick(t6, t3, t4, group->field)
         || !group->meth->field_sqr(group, t6, t6, ctx)
-        || !BN_mod_sub_quick(t6, t6, t2, group->field)
-        || !BN_mod_sub_quick(t6, t6, t4, group->field)
-        || !BN_mod_sub_quick(t7, t2, t1, group->field)
-        || !group->meth->field_sqr(group, t7, t7, ctx)
-        || !group->meth->field_mul(group, t5, t4, t6, ctx)
-        || !group->meth->field_mul(group, t5, t0, t5, ctx)
+        || !group->meth->field_mul(group, t0, t2, t5, ctx)
+        || !group->meth->field_mul(group, t0, t7, t0, ctx)
         /* r->X coord output */
-        || !BN_mod_sub_quick(r->X, t7, t5, group->field)
-        || !BN_mod_add_quick(t2, t2, t1, group->field)
-        || !group->meth->field_sqr(group, t5, t4, ctx)
-        || !group->meth->field_mul(group, t5, t5, t0, ctx)
-        || !group->meth->field_mul(group, t6, t6, t2, ctx)
-        || !BN_mod_lshift1_quick(t6, t6, group->field)
+        || !BN_mod_sub_quick(r->X, t6, t0, group->field)
+        || !BN_mod_add_quick(t6, t3, t4, group->field)
+        || !group->meth->field_sqr(group, t3, t2, ctx)
+        || !group->meth->field_mul(group, t7, t3, t7, ctx)
+        || !group->meth->field_mul(group, t5, t5, t6, ctx)
+        || !BN_mod_lshift1_quick(t5, t5, group->field)
         /* r->Z coord output */
-        || !BN_mod_add_quick(r->Z, t5, t6, group->field))
+        || !BN_mod_add_quick(r->Z, t7, t5, group->field))
         goto err;
 
     ret = 1;
