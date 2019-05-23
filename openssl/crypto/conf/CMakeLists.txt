@@ -1,9 +1,12 @@
-include_directories(../../include)
+include_directories(../../)
+include_directories(../include)
+
+file(GLOB CONF_SRC ./*.c)
 
 add_library(
   conf
 
   OBJECT
 
-  conf_api.c
+  ${CONF_SRC}
 )

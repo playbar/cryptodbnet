@@ -100,6 +100,7 @@ add_subdirectory(hmac)
 # Level 3
 add_subdirectory(cmac)
 add_subdirectory(evp)
+add_subdirectory(googletest)
 #add_subdirectory(hkdf)
 add_subdirectory(pem)
 add_subdirectory(x509)
@@ -109,7 +110,7 @@ add_subdirectory(x509v3)
 #add_subdirectory(pkcs8)
 
 # Test support code
-#add_subdirectory(test)
+add_subdirectory(test)
 
 add_library(
   crypto

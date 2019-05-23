@@ -480,7 +480,8 @@ void CONF_module_set_usr_data(CONF_MODULE *pmod, void *usr_data)
 
 char *CONF_get1_default_config_file(void)
 {
-    char *file, *sep = "";
+    char *file;
+    const char *sep = "";
     int len;
 
     if ((file = ossl_safe_getenv("OPENSSL_CONF")) != NULL)

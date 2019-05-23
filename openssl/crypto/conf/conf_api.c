@@ -181,7 +181,7 @@ static void value_free_stack_doall(CONF_VALUE *a)
         OPENSSL_free(vv);
     }
     sk_CONF_VALUE_free(sk);
-    OPENSSL_free(a->section);
+    OPENSSL_free((void*)a->section);
     OPENSSL_free(a);
 }
 
@@ -212,7 +212,7 @@ CONF_VALUE *_CONF_new_section(CONF *conf, const char *section)
  err:
     sk_CONF_VALUE_free(sk);
     if (v != NULL)
-        OPENSSL_free(v->section);
+        OPENSSL_free((void*)v->section);
     OPENSSL_free(v);
     return NULL;
 }

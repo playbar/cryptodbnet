@@ -1,9 +1,8 @@
-include_directories(../../include)
+include_directories(../include)
 
 if (${ARCH} STREQUAL "arm")
   set(
     POLY1305_ARCH_SOURCES
-
     poly1305_arm_asm.S
   )
 endif()

@@ -1,11 +1,14 @@
-include_directories(../../include)
+include_directories(../include)
+include_directories(../../)
+
+file(GLOB BIO_SRC ./*.c)
 
 add_library(
   bio
 
   OBJECT
 
-  bio_cb.c
+  ${BIO_SRC}
 
 )
 

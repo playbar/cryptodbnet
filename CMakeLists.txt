@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.6)
 project(crypto)
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fpermissive -fvisibility=hidden -Wall -std=c++14" )
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden -std=c++14" )
 
 set(CMAKE_CXX_STANDARD 14)
 
