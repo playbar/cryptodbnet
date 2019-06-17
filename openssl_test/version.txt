@@ -1,0 +1,23 @@
+1. OpenSSL:
+	version: 1.0.1g
+	commit: b2d951e;
+	date: 2014.04.08;
+	url: https://github.com/openssl/openssl/releases?after=OpenSSL_1_0_2-beta3
+2. cppcodec:
+	version: v0.2
+	commit: 302dc28
+	date: 2018.08.24
+	url: https://github.com/tplgy/cppcodec/releases
+3. b64.c:
+	commit: 7ae6c41
+	date: 2017.08.10
+	url: https://github.com/littlstar/b64.c
+4. http-parser:
+	version: v2.8.1
+	commit: 54f55a2
+	date: 2018.03.31
+	url: https://github.com/nodejs/http-parser/releases
+5. curl:
+	version: 7.44.0
+	date: 2015.08.12
+	url: https://curl.haxx.se/download.html
