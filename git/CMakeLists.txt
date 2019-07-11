@@ -19,6 +19,7 @@ add_definitions(-DPAGER_ENV="LESS=FRX LV=-c")
 add_definitions(-DGIT_VERSION="2.22.0")
 add_definitions(-DGIT_BUILT_FROM_COMMIT="commit")
 add_definitions(-DGIT_USER_AGENT="git/${GIT_VERSION}")
+add_definitions(-DLIBICONV_PLUG)
 
 #set(ETC_GITATTRIBUTES  /etc/gitattributes)
 
@@ -69,6 +70,7 @@ target_include_directories(git PRIVATE
 target_link_libraries(git
         ssl
         libcurl
+        iconv
 )
 
 #####
