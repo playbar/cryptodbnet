@@ -1,11 +1,11 @@
-#include "../cache.h"
-#include "../config.h"
-#include "../refs.h"
+#include "cache.h"
+#include "config.h"
+#include "refs.h"
 #include "refs-internal.h"
 #include "packed-backend.h"
-#include "../iterator.h"
-#include "../lockfile.h"
-#include "../chdir-notify.h"
+#include "iterator.h"
+#include "lockfile.h"
+#include "chdir-notify.h"
 
 enum mmap_strategy {
 	/*

@@ -1,8 +1,8 @@
-#include "../cache.h"
-#include "../refs.h"
+#include "cache.h"
+#include "refs.h"
 #include "refs-internal.h"
 #include "ref-cache.h"
-#include "../iterator.h"
+#include "iterator.h"
 
 void add_entry_to_dir(struct ref_dir *dir, struct ref_entry *entry)
 {

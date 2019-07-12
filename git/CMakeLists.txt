@@ -25,6 +25,13 @@ ADD_DEFINITIONS (-DLIBDIR=\"\")
 
 #set(ETC_GITATTRIBUTES  /etc/gitattributes)
 
+include_directories(libgit PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/iconv/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/libcharset/include
+        )
+
 file(GLOB GIT_ICONV_SRC
         iconv/lib/iconv.c
         libcharset/lib/localcharset.c)
@@ -68,9 +75,9 @@ file(GLOB GIT_XDIFF_SRC
         ${CMAKE_CURRENT_SOURCE_DIR}/xdiff/*.c)
 
 file(GLOB GIT_SRC
-        ${CMAKE_CURRENT_SOURCE_DIR}/*.c)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
 
-add_executable(git
+add_library(libgit STATIC
         ${GIT_SRC}
         ${GIT_ICONV_SRC}
         ${GIT_BLOCKSHA1_SRC}
@@ -86,13 +93,14 @@ add_executable(git
         ${GIT_XDIFF_SRC}
         )
 
-target_include_directories(git PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/iconv/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/libcharset/include
-        )
+
+######
+
+add_executable(git
+        cmd/git.c)
 
 target_link_libraries(git
+        libgit
         ssl
         libcurl
         expat

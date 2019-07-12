@@ -1,10 +1,10 @@
 #include "cache.h"
 #include "skipping.h"
-#include "../commit.h"
-#include "../fetch-negotiator.h"
-#include "../prio-queue.h"
-#include "../refs.h"
-#include "../tag.h"
+#include "commit.h"
+#include "fetch-negotiator.h"
+#include "prio-queue.h"
+#include "refs.h"
+#include "tag.h"
 
 /* Remember to update object flag allocation in object.h */
 /*
