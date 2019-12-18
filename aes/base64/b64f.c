@@ -1,12 +1,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "base64.h"
 
 int lower(int a);
 
-int main(int argc,char** argv) {
+void print_time(char *pmsg)
+{
+	struct timeval tv;
+	struct tm *tmp_ptr = NULL;
+	gettimeofday(&tv,NULL);
+	tmp_ptr = localtime(&tv.tv_sec);
+
+	printf("%d-%02d-%02d %02d:%02d:%02d.%.04d, %s\n",
+		   tmp_ptr->tm_year + 1900,
+		   tmp_ptr->tm_mon + 1,
+		   tmp_ptr->tm_mday,
+		   tmp_ptr->tm_hour,
+		   tmp_ptr->tm_min,
+		   tmp_ptr->tm_sec,
+		   tv.tv_usec,
+		   pmsg);
+	return;
+}
+
+
+int main(int argc,char** argv)
+{
 	
 	char opt = ' ';
 	if (argc > 1)
@@ -25,7 +47,9 @@ int main(int argc,char** argv) {
 		puts("\nERROR: insufficient or incorrect parameters...");
 		return 1;
 	}
-	
+
+	print_time("begin");
+
 	int bcoded = 0;
 	switch(opt) {
 		case 'd':
@@ -69,7 +93,9 @@ int main(int argc,char** argv) {
 			puts("\nINVALID OPTION");
 			bcoded = -1;
 	}
-	
+
+	print_time("end");
+
 	printf("\nBytes encoded/decoded: %i\n",bcoded);
 	
 	return 0;

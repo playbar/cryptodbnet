@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "base64.h"
 
@@ -44,8 +45,30 @@ char *score(int x);
 int testScore = 0;
 int testTotal = 0;
 
+
+void print_time(char *pmsg)
+{
+	struct timeval tv;
+	struct tm *tmp_ptr = NULL;
+	gettimeofday(&tv,NULL);
+	tmp_ptr = localtime(&tv.tv_sec);
+
+	printf("%d-%02d-%02d %02d:%02d:%02d.%.04d, %s\n",
+		   tmp_ptr->tm_year + 1900,
+		   tmp_ptr->tm_mon + 1,
+		   tmp_ptr->tm_mday,
+		   tmp_ptr->tm_hour,
+		   tmp_ptr->tm_min,
+		   tmp_ptr->tm_sec,
+		   tv.tv_usec,
+		   pmsg);
+	return;
+}
+
+
 int main() {
-	
+
+	print_time("begin");
 	puts("\nbase64.c [Test Data]");
 	puts("------------------------------------");
 	printf("%s           : %s\n",HEXSTR_A,STRING_A);
@@ -67,6 +90,7 @@ int main() {
 	puts("------------------------------------");
 	printf("\n[END] Test score: %g%% (%d/%d)\n",PERCENT(testScore,testTotal),testScore,testTotal);
 
+	print_time("end");
 	return 0;
 }
 
