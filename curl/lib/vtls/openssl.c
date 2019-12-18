@@ -2559,18 +2559,18 @@ static CURLcode ossl_connect_step1(struct connectdata *conn, int sockindex)
     infof(data, "Cipher selection: %s\n", ciphers);
   }
 
-#ifdef HAVE_SSL_CTX_SET_CIPHERSUITES
-  {
-    char *ciphers13 = SSL_CONN_CONFIG(cipher_list13);
-    if(ciphers13) {
-      if(!SSL_CTX_set_ciphersuites(BACKEND->ctx, ciphers13)) {
-        failf(data, "failed setting TLS 1.3 cipher suite: %s", ciphers13);
-        return CURLE_SSL_CIPHER;
-      }
-      infof(data, "TLS 1.3 cipher selection: %s\n", ciphers13);
-    }
-  }
-#endif
+//#ifdef HAVE_SSL_CTX_SET_CIPHERSUITES
+//  {
+//    char *ciphers13 = SSL_CONN_CONFIG(cipher_list13);
+//    if(ciphers13) {
+//      if(!SSL_CTX_set_ciphersuites(BACKEND->ctx, ciphers13)) {
+//        failf(data, "failed setting TLS 1.3 cipher suite: %s", ciphers13);
+//        return CURLE_SSL_CIPHER;
+//      }
+//      infof(data, "TLS 1.3 cipher selection: %s\n", ciphers13);
+//    }
+//  }
+//#endif
 
 #ifdef HAVE_SSL_CTX_SET_POST_HANDSHAKE_AUTH
   /* OpenSSL 1.1.1 requires clients to opt-in for PHA */
@@ -2678,12 +2678,12 @@ static CURLcode ossl_connect_step1(struct connectdata *conn, int sockindex)
   SSL_CTX_set_verify(BACKEND->ctx,
                      verifypeer ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, NULL);
 
-  /* Enable logging of secrets to the file specified in env SSLKEYLOGFILE. */
-#if defined(ENABLE_SSLKEYLOGFILE) && defined(HAVE_KEYLOG_CALLBACK)
-  if(keylog_file_fp) {
-    SSL_CTX_set_keylog_callback(BACKEND->ctx, ossl_keylog_callback);
-  }
-#endif
+//  /* Enable logging of secrets to the file specified in env SSLKEYLOGFILE. */
+//#if defined(ENABLE_SSLKEYLOGFILE) && defined(HAVE_KEYLOG_CALLBACK)
+//  if(keylog_file_fp) {
+//    SSL_CTX_set_keylog_callback(BACKEND->ctx, ossl_keylog_callback);
+//  }
+//#endif
 
   /* Enable the session cache because it's a prerequisite for the "new session"
    * callback. Use the "external storage" mode to avoid that OpenSSL creates

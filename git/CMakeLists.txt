@@ -96,14 +96,20 @@ add_library(libgit STATIC
 
 ######
 
-add_executable(git
-        cmd/git.c)
+link_libraries(libgit)
+link_libraries(ssl)
+link_libraries(libcurl)
+link_libraries(expat)
 
-target_link_libraries(git
-        libgit
-        ssl
-        libcurl
-        expat
-)
+add_executable(git cmd/git.c)
+add_executable(git_fetch cmd/http-fetch.c)
+add_executable(git_push cmd/http-push.c)
+
+#target_link_libraries(git
+#        libgit
+#        ssl
+#        libcurl
+#        expat
+#)
 
 #####
