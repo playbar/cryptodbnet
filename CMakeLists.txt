@@ -7,13 +7,13 @@ set(CMAKE_CXX_STANDARD 14)
 
 message(${CMAKE_CXX_COMPILER_ID})
 
-#add_subdirectory(aes)
+add_subdirectory(aes)
 #add_subdirectory(boringssl)
 #add_subdirectory(cryptopp)
-add_subdirectory(libiconv)
-add_subdirectory(curl)
-add_subdirectory(openssl)
-add_subdirectory(git)
+#add_subdirectory(libiconv)
+#add_subdirectory(curl)
+#add_subdirectory(openssl)
+#add_subdirectory(git)
 #add_subdirectory(openssl_test)
 
 

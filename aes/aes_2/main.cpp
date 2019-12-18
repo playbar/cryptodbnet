@@ -149,8 +149,23 @@ void test_cryto_str()
     printf("decode :%s", de);
 }
 
+
+void test_base64()
+{
+
+    unsigned char str[7] = "ABCDEF";
+    char *strencode = b64_encode(str, 7);
+
+    unsigned char *pdata = b64_decode(strencode, strlen(strencode));
+    free(strencode);
+    free(pdata);
+    return;
+
+}
+
 int main()
 {
+    test_base64();
     testStringData();
     test_crypto_file();
     return 0;

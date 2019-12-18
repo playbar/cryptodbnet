@@ -104,7 +104,6 @@ target_link_libraries(git
         ssl
         libcurl
         expat
-        iconv
 )
 
 #####
